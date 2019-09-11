@@ -215,15 +215,6 @@ jobs:
           name: build and package grafana
           command: './scripts/build/build-all.sh'
       - run:
-          name: sign packages
-          command: './scripts/build/sign_packages.sh'
-      - run:
-          name: verify signed packages
-          command: |
-            mkdir -p ~/.rpmdb/pubkeys
-            curl -s https://packages.grafana.com/gpg.key > ~/.rpmdb/pubkeys/grafana.key
-            ./scripts/build/verify_signed_packages.sh dist/*.rpm
-      - run:
           name: sha-sum packages
           command: 'go run build.go sha-dist'
       - run:
@@ -249,9 +240,6 @@ jobs:
       - run:
           name: build and package grafana
           command: './scripts/build/build.sh'
-      - run:
-          name: sign packages
-          command: './scripts/build/sign_packages.sh'
       - run:
           name: sha-sum packages
           command: 'go run build.go sha-dist'
@@ -361,9 +349,6 @@ jobs:
           name: package grafana
           command: './scripts/build/build.sh --fast --package-only'
       - run:
-          name: sign packages
-          command: './scripts/build/sign_packages.sh'
-      - run:
           name: sha-sum packages
           command: 'go run build.go sha-dist'
       - run:
@@ -386,8 +371,6 @@ jobs:
       - run: cp dist/grafana-latest.linux-*.tar.gz packaging/docker
       - run: cd packaging/docker && ./build-deploy.sh "master-${CIRCLE_SHA1}"
       - run: rm packaging/docker/grafana-latest.linux-*.tar.gz
-      - run: cp enterprise-dist/grafana-enterprise-*.linux-amd64.tar.gz packaging/docker/grafana-latest.linux-x64.tar.gz
-      - run: cd packaging/docker && ./build-enterprise.sh "master"
 
 
   grafana-docker-pr:
@@ -414,139 +397,6 @@ jobs:
       - run: cp dist/grafana-latest.linux-*.tar.gz packaging/docker
       - run: cd packaging/docker && ./build-deploy.sh "${CIRCLE_TAG}"
       - run: rm packaging/docker/grafana-latest.linux-*.tar.gz
-      - run: cp enterprise-dist/grafana-enterprise-*.linux-amd64.tar.gz packaging/docker/grafana-latest.linux-x64.tar.gz
-      - run: cd packaging/docker && ./build-enterprise.sh "${CIRCLE_TAG}"
-
-  build-enterprise:
-    docker:
-     - image: grafana/build-container:1.2.8
-    working_directory: /go/src/github.com/grafana/grafana
-    steps:
-      - checkout
-      - run:
-          name: prepare build tools
-          command: '/tmp/bootstrap.sh'
-      - run:
-          name: checkout enterprise
-          command: './scripts/build/prepare-enterprise.sh'
-      - run:
-          name: test enterprise
-          command: 'go test ./pkg/extensions/...'
-      - run:
-          name: build and package enterprise
-          command: './scripts/build/build.sh -enterprise'
-      - run:
-          name: sign packages
-          command: './scripts/build/sign_packages.sh'
-      - run:
-          name: sha-sum packages
-          command: 'go run build.go sha-dist'
-      - run:
-          name: move enterprise packages into their own folder
-          command: 'mv dist enterprise-dist'
-      - persist_to_workspace:
-          root: .
-          paths:
-            - enterprise-dist/*
-
-  build-all-enterprise:
-    docker:
-    - image: grafana/build-container:1.2.8
-    working_directory: /go/src/github.com/grafana/grafana
-    steps:
-    - checkout
-    - run:
-        name: prepare build tools
-        command: '/tmp/bootstrap.sh'
-    - run:
-        name: checkout enterprise
-        command: './scripts/build/prepare-enterprise.sh'
-    - restore_cache:
-        key: phantomjs-binaries-{{ checksum "scripts/build/download-phantomjs.sh" }}
-    - run:
-        name: download phantomjs binaries
-        command: './scripts/build/download-phantomjs.sh'
-    - save_cache:
-        key: phantomjs-binaries-{{ checksum "scripts/build/download-phantomjs.sh" }}
-        paths:
-        - /tmp/phantomjs
-    - run:
-        name: test enterprise
-        command: 'go test ./pkg/extensions/...'
-    - run:
-        name: build and package grafana
-        command: './scripts/build/build-all.sh -enterprise'
-    - run:
-        name: sign packages
-        command: './scripts/build/sign_packages.sh'
-    - run:
-        name: verify signed packages
-        command: |
-          mkdir -p ~/.rpmdb/pubkeys
-          curl -s https://packages.grafana.com/gpg.key > ~/.rpmdb/pubkeys/grafana.key
-          ./scripts/build/verify_signed_packages.sh dist/*.rpm
-    - run:
-        name: sha-sum packages
-        command: 'go run build.go sha-dist'
-    - run:
-        name: move enterprise packages into their own folder
-        command: 'mv dist enterprise-dist'
-    - persist_to_workspace:
-        root: .
-        paths:
-        - enterprise-dist/*
-
-  deploy-enterprise-master:
-    docker:
-      - image: grafana/grafana-ci-deploy:1.2.2
-    steps:
-      - attach_workspace:
-          at: .
-      - run:
-          name: gcp credentials
-          command: 'echo ${GCP_GRAFANA_UPLOAD_KEY} > /tmp/gcpkey.json'
-      - run:
-          name: sign in to gcp
-          command: '/opt/google-cloud-sdk/bin/gcloud auth activate-service-account --key-file=/tmp/gcpkey.json'
-      - run:
-          name: deploy to gcp
-          command: '/opt/google-cloud-sdk/bin/gsutil cp ./enterprise-dist/* gs://$GCP_BUCKET_NAME/enterprise/master'
-      - run:
-          name: Deploy to grafana.com
-          command: |
-            cd enterprise-dist
-            ../scripts/build/release_publisher/release_publisher -apikey ${GRAFANA_COM_API_KEY} -enterprise -version "v$(cat grafana.version)" --nightly
-
-
-  deploy-enterprise-release:
-    docker:
-    - image: grafana/grafana-ci-deploy:1.2.2
-    steps:
-      - checkout
-      - attach_workspace:
-         at: .
-      - run:
-          name: gcp credentials
-          command: 'echo ${GCP_GRAFANA_UPLOAD_KEY} > /tmp/gcpkey.json'
-      - run:
-          name: sign in to gcp
-          command: '/opt/google-cloud-sdk/bin/gcloud auth activate-service-account --key-file=/tmp/gcpkey.json'
-      - run:
-          name: deploy to gcp
-          command: '/opt/google-cloud-sdk/bin/gsutil cp ./enterprise-dist/* gs://$GCP_BUCKET_NAME/enterprise/release'
-      - run:
-          name: Deploy to Grafana.com
-          command: './scripts/build/publish.sh --enterprise'
-      - run:
-          name: Load GPG private key
-          command: './scripts/build/load-signing-key.sh'
-      - run:
-          name: Update Debian repository
-          command: './scripts/build/update_repo/update-deb.sh "enterprise" "$GPG_KEY_PASSWORD" "$CIRCLE_TAG" "enterprise-dist"'
-      - run:
-          name: Update RPM repository
-          command: './scripts/build/update_repo/update-rpm.sh "enterprise" "$GPG_KEY_PASSWORD" "$CIRCLE_TAG" "enterprise-dist"'
-
 
   deploy-master:
     docker:
@@ -678,8 +528,6 @@ workflows:
     jobs:
       - build-all:
           filters: *filter-only-master
-      - build-all-enterprise:
-          filters: *filter-only-master
       - codespell:
           filters: *filter-only-master
       - lint-go:
@@ -709,7 +557,6 @@ workflows:
       - grafana-docker-master:
           requires:
             - build-all
-            - build-all-enterprise
             - test-backend
             - test-frontend
             - codespell
@@ -717,18 +564,6 @@ workflows:
             - shellcheck
             - mysql-integration-test
             - postgres-integration-test
-          filters: *filter-only-master
-      - deploy-enterprise-master:
-          requires:
-            - build-all
-            - test-backend
-            - test-frontend
-            - codespell
-            - lint-go
-            - shellcheck
-            - mysql-integration-test
-            - postgres-integration-test
-            - build-all-enterprise
           filters: *filter-only-master
       - build-oss-msi:
           requires:
@@ -758,8 +593,6 @@ workflows:
     jobs:
       - build-all:
           filters: *filter-only-release
-      - build-all-enterprise:
-          filters: *filter-only-release
       - codespell:
           filters: *filter-only-release
       - lint-go:
@@ -786,22 +619,9 @@ workflows:
             - postgres-integration-test
             - build-oss-msi
           filters: *filter-only-release
-      - deploy-enterprise-release:
-          requires:
-            - build-all
-            - build-all-enterprise
-            - test-backend
-            - test-frontend
-            - codespell
-            - lint-go
-            - shellcheck
-            - mysql-integration-test
-            - postgres-integration-test
-          filters: *filter-only-release
       - grafana-docker-release:
           requires:
             - build-all
-            - build-all-enterprise
             - test-backend
             - test-frontend
             - codespell
